@@ -61,7 +61,7 @@ def sign_up_save():
             "email": email,
             "password": password_hash,
             "profile": "",
-            "profilePict": "src/images/profiles/profile.jpeg"
+            "profilePict": "Frontend-MRI-Condyle-NET/public/profiles/profile.jpeg"
         }
         current_app.db.users.insert_one(doc)
         
@@ -76,8 +76,31 @@ def sign_up_save():
             "msg": str(e)
         }), 500
 
+@auth_.route('/api/forget-password-check', methods=["POST"])
+def forget_password_check():
+    email = request.form['email']
+    password = request.form['password']
 
-@auth_.route("/logout", methods=["DELETE"])
+    # Validasi input
+    if not email or not password:
+        return jsonify({'result': 'failed', 'msg': 'Email and password are required.'}), 400
+
+    # Hash password
+    password_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+    user = current_app.db.users.find_one({"email": email})
+    if user:
+        current_app.db.users.update_one(
+            {"email": email},
+            {"$set": {"password": password_hash}}
+        )
+        return jsonify({'result': 'success', 'msg': 'Password successfully changed!'}), 200
+
+    return jsonify({'result': 'failed', 'msg': 'Email not found!'}), 404
+
+
+
+@auth_.route("/api/logout", methods=["DELETE"])
 def logout():
     try:
         response = {"message": "Token successfully deleted"}

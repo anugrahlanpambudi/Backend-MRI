@@ -8,7 +8,7 @@ def create_app():
     app.config.from_object(Config)
 
     # ✅ Izinkan CORS hanya untuk asal frontend (Next.js)
-    CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
 
     # ✅ Setup database
     client = MongoClient(app.config['MONGODB_URL'])
@@ -17,5 +17,13 @@ def create_app():
     # ✅ Register blueprint
     from .routes.auth import auth_
     app.register_blueprint(auth_)
+
+     # ✅ Predict blueprint
+    from .routes.predict import predict_
+    app.register_blueprint(predict_)
+
+    from .routes.profile import profile_
+    app.register_blueprint(profile_)
+
 
     return app
