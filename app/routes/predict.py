@@ -1,11 +1,13 @@
-from flask import Flask, request, jsonify, Blueprint
+from flask import Flask, request, jsonify, Blueprint, current_app
 from mmdet.apis import init_detector, inference_detector
 from mmcv import imread
 import numpy as np
 import cv2
 import os
 import torch
+import jwt
 import uuid
+from datetime import datetime
 from datetime import datetime
 
 predict_ = Blueprint('predict', __name__)
@@ -129,15 +131,121 @@ def predict_image():
         result_path = os.path.join(RESULT_FOLDER, result_filename)
         cv2.imwrite(result_path, overlay_image)
 
+        SECRET_KEY = current_app.config['SECRET_KEY']
+        token_receive = request.form.get("mytoken")
+    
+        if not token_receive:
+            return jsonify({"msg": "Unauthorized access: No token provided"}), 401
+
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=["HS256"])
+        email = payload["id"]
+
+        now = datetime.now()
+        formatted = now.strftime("%Y-%m-%d %H:%M:%S")
+
+        doc = {
+            "email": email,
+            "uploaded_image": filename,
+            "result_image": result_filename,
+            "result_url": f"/results/{result_filename}",
+            "upload_url": f"/uploads/{filename}",
+            "model_used": indices,
+            "vote_threshold": vote_threshold,
+            "date": formatted,
+        }
+
+        current_app.db.history.insert_one(doc)
+
         return jsonify({
             "status": "success",
             "message": "Segmentasi berhasil dilakukan.",
             "uploaded_image": filename,
             "result_image": result_filename,
-             "result_url": f"/results/{result_filename}",
+            "result_url": f"/results/{result_filename}",
             "model_used": indices,
             "vote_threshold": vote_threshold
         })
 
     except Exception as e:
         return jsonify({"status": "error", "message": f"Terjadi kesalahan: {str(e)}"}), 500
+    
+@predict_.route('/api/get-history', methods=["POST"])
+def get_history():
+    SECRET_KEY = current_app.config['SECRET_KEY']
+    token_receive = request.form.get("mytoken")
+    
+    if not token_receive:
+        return jsonify({"msg": "Unauthorized access: No token provided"}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=["HS256"])
+        email = payload["id"]
+
+        history_cursor = current_app.db.history.find({"email": email}, {"_id": 0, "password": 0})
+        history_list = list(history_cursor)  
+        if history_list:
+            return jsonify({"msg": "History fetched successfully", "history": history_list}), 200
+        else:
+            return jsonify({"msg": "No history found", "history": []}), 200
+
+
+    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
+        return jsonify({"msg": "Token is invalid or expired"}), 401
+    
+@predict_.route('/api/delete-history', methods=["POST"])
+def delete_history():
+    SECRET_KEY = current_app.config['SECRET_KEY']
+    token_receive = request.form.get("mytoken")
+    date = request.form.get("date")  # digunakan untuk identifikasi dokumen
+
+    if not token_receive:
+        return jsonify({"msg": "Unauthorized access: No token provided"}), 401
+    if not date:
+        return jsonify({"msg": "Bad request: 'date' is required"}), 400
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=["HS256"])
+        email = payload["id"]
+
+        # Cari dokumen berdasarkan email dan tanggal
+        doc = current_app.db.history.find_one({
+            "email": email,
+            "date": date,
+        })
+
+        if not doc:
+            return jsonify({"msg": "History not found"}), 404
+
+        # Ambil nama file yang perlu dihapus
+        uploaded_image = doc.get("uploaded_image")
+        result_image = doc.get("result_image")
+
+        # Hapus file dari sistem file lokal
+        try:
+            if uploaded_image:
+                upload_path = os.path.join(UPLOAD_FOLDER, uploaded_image)
+                if os.path.exists(upload_path):
+                    os.remove(upload_path)
+
+            if result_image:
+                result_path = os.path.join(RESULT_FOLDER, result_image)
+                if os.path.exists(result_path):
+                    os.remove(result_path)
+        except Exception as file_error:
+            return jsonify({"msg": "Failed to delete file(s)", "error": str(file_error)}), 500
+
+        # Hapus dari database
+        delete_result = current_app.db.history.delete_one({
+            "email": email,
+            "date": date
+        })
+
+        if delete_result.deleted_count == 1:
+            return jsonify({"msg": "History and files deleted successfully"}), 200
+        else:
+            return jsonify({"msg": "Failed to delete history from database"}), 500
+
+    except jwt.ExpiredSignatureError:
+        return jsonify({"msg": "Token has expired"}), 401
+    except jwt.DecodeError:
+        return jsonify({"msg": "Token is invalid"}), 401
