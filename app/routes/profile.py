@@ -8,6 +8,29 @@ profile_ = Blueprint('profile', __name__)
 PROFILES_FOLDER = 'Frontend-MRI-Condyle-NET/public/profiles'
 os.makedirs(PROFILES_FOLDER, exist_ok=True)
 
+@profile_.route('/api/get-profile', methods=["POST"])
+def get_profile():
+    SECRET_KEY = current_app.config['SECRET_KEY']
+    token_receive = request.form.get("mytoken")
+    
+    if not token_receive:
+        return jsonify({"msg": "Unauthorized access: No token provided"}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=["HS256"])
+        email = payload["id"]
+
+        user = current_app.db.users.find_one({"email": email}, {"_id": 0, "password": 0})  # Exclude sensitive fields
+
+        if user:
+            return jsonify({"msg": "Profile fetched successfully", "profile": user}), 200
+        else:
+            return jsonify({"msg": "User not found"}), 404
+
+    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
+        return jsonify({"msg": "Token is invalid or expired"}), 401
+
+
 @profile_.route('/api/update-profile', methods=["POST"])
 def update_profile():
     SECRET_KEY = current_app.config['SECRET_KEY']
